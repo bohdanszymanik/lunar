@@ -4,16 +4,10 @@ open System
 open System.Globalization
 open FSharp.Data
 
-type Simple = JsonProvider<""" { "name":"John", "age":94 } """>
-let simple = Simple.Parse(""" { "name":"Tomas", "age":4 } """)
-simple.Age
-simple.Name
-
+(*
 // preload moon phase data back to 1700
 // http://api.usno.navy.mil/moon/phase?date=1/1/1700&nump=52
 type Phases = JsonProvider<"http://api.usno.navy.mil/moon/phase?date=1/1/1700&nump=52">
-//let phases = Phases.Load("http://api.usno.navy.mil/moon/phase?date=1/1/1700&nump=52" )
-//phases.Phasedata |> Array.map (fun pd -> pd.Phase, pd.Date)
 
 let phases = 
     [1700..2016]
@@ -26,10 +20,15 @@ let phases =
 phases |> Array.length
 
 // save this data locally to avoid retrieving it every time - Csv 
-type localCSV = CsvProvider<Schema = "Phase (string) , Date (DateTime)", HasHeaders = false>
+type LocalCSV = CsvProvider<Schema = "Phase (string) , Date (DateTime)", HasHeaders = false>
 let localRows = phases |>
-                Array.map (fun (p,d) -> localCSV.Row(p,d.ToString()))
-(new localCSV(localRows)).Save(__SOURCE_DIRECTORY__ + "\\savedPhases.csv")
+                Array.map (fun (p,d) -> LocalCSV.Row(p,d.ToString()))
+(new LocalCSV(localRows)).Save(__SOURCE_DIRECTORY__ + "\\savedPhases.csv")
+*)
+// and to bring it back from the saved Data
+type LocalCSV = CsvProvider<Sample = "savedPhases.csv", Schema = "Phase (string), Date (string)">
+let phases = [|for row in (LocalCSV.Load(__SOURCE_DIRECTORY__ + "\\savedPhases.csv")).Rows -> row.Phase, DateTime.Parse(row.Date)|]
+
 
 (*
 how can we make a lookup for distance to nearest full moon easier?
@@ -50,43 +49,45 @@ let's say we only track next full moon from any date, and that full moon date is
 So given any choice of day, we know... date of next full moon, we can infer last full moon, distance to next full moon etc...
 *)
 
-let daysFrom1700 (d:DateTime) = (int)(d - DateTime(1700,1,1)).TotalDays
+let daysFrom1700 (d:DateTime) = 1 + (int)(d - DateTime(1700,1,1)).TotalDays
+daysFrom1700 (DateTime(1700,1,5))
+daysFrom1700 (DateTime(1700,2,3))
+daysFrom1700 (DateTime(1700,3,5))
 
 // pre-allocate an array to hold days from 1/1/1700 through to today - populate with days to next full moon
 
 let daysToNextFM = Array.create (daysFrom1700 DateTime.Now) 0
 // we know the phases are time ordered so we can iterate forwards through them
 phases
-|> Array.take 5
+|> Array.take 1000
 |> Array.filter (fun (p,_) -> (p = "Full Moon") )
 |> Array.iteri (fun i (p,d) -> 
     // progress through daysToNextFM from first occurence of 0 up to this full moon - store days difference
-    let thisNMDaysFrom0 = daysFrom1700 d
-    let firstZero = daysToNextFM |> Array.findIndex (fun e -> e = 0)
-    let prevNMDaysFrom0 = phases.[i-1] |> fun (_,dPrev) -> daysFrom1700 dPrev
-    Array.fill daysToNextFM firstZero thisNMDaysFrom0 (thisNMDaysFrom0 - prevNMDaysFrom0)
+    let thisFMDaysFrom0 = daysFrom1700 d
+    let firstZero = daysToNextFM |> Array.findIndex (fun e -> e = 0) // this happens to be equivalent to the previous full moon
+//    printfn "firstZero %A" firstZero
+//    printfn "thisFMDaysFrom0 %A" thisFMDaysFrom0
+    match i with
+    | 0 -> Array.fill daysToNextFM 0 thisFMDaysFrom0 thisFMDaysFrom0
+    | _ -> 
+        Array.fill daysToNextFM firstZero (thisFMDaysFrom0 - firstZero) thisFMDaysFrom0
+//    daysToNextFM |> printfn "%A"
     )
 
-let t = Array.create 10 0
-Array.fill t  2 4 2
-
-type Quakes = CsvProvider<"signif.txt">
+type Quakes = CsvProvider<Sample = "signif.txt", Separators = "\t", InferRows = 2000>
 let quakes = Quakes.Load(@"signif.txt")
 
-quakes.Rows |> Seq.take 5
+quakes.Rows |> Seq.take 2000
+    // we're looking at just those quakes after 1700 for which the month, day and magnitude in EQ_PRIMARY are known
+|> Seq.filter (fun r -> (r.YEAR >= 1700)
+                        && r.MONTH.HasValue
+                        && r.DAY.HasValue 
+                        && not (Double.IsNaN(r.EQ_PRIMARY))  
+)
 |> Seq.iter (fun r ->
-    let d = new DateTime(r.YEAR, r.MONTH, r.DAY)
-    printfn "%A" d.ToString()
+    let d = new DateTime(r.YEAR, r.MONTH.Value, r.DAY.Value)
+    printfn "%A %A %A %A" r.EQ_PRIMARY d (daysFrom1700(d)) daysToNextFM.[daysFrom1700(d)]
+    
 )
 
 
-let d = new DateTime(2016,8,3)
-let cCal = new ChineseLunisolarCalendar()
-//d.GetDateTimeFormats()
-cCal.MinSupportedDateTime
-
-cCal.GetDayOfMonth(d)
-cCal.GetMonth(d)
-// 1 is new moon, 15 is full moon - so take absolute difference from 15... to get a distance MeasureAnnotatedAbbreviationAttribute
-
-d.ToShortDateString()
