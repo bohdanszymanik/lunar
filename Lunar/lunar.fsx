@@ -122,4 +122,6 @@ let countByDistToFullMoon =
 
 open FSharp.Charting
 
-Chart.Bar countByDistToFullMoon
+Chart.Column countByDistToFullMoon
+|> Chart.WithXAxis(Enabled=true, Title="Days from the nearest full moon")
+|> Chart.WithYAxis(Enabled=true, Title="Count of significant earthquakes since 1700 (where date fully known)")
