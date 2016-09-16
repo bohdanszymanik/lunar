@@ -59,7 +59,8 @@ daysFrom1700 (DateTime(1700,3,5))
 let daysToNextFM = Array.create (daysFrom1700 DateTime.Now) 0
 // we know the phases are time ordered so we can iterate forwards through them
 phases
-|> Array.take 1000
+//|> Array.take 7835
+|> Array.filter (fun (_,d) -> d < DateTime.Now) // ha ha tripped me up here - I'd downloaded moon phases to the end of the year ie past current date
 |> Array.filter (fun (p,_) -> (p = "Full Moon") )
 |> Array.iteri (fun i (p,d) -> 
     // progress through daysToNextFM from first occurence of 0 up to this full moon - store days difference
@@ -73,21 +74,52 @@ phases
         Array.fill daysToNextFM firstZero (thisFMDaysFrom0 - firstZero) thisFMDaysFrom0
 //    daysToNextFM |> printfn "%A"
     )
+phases |> Array.length
+phases.[7830..]
 
 type Quakes = CsvProvider<Sample = "signif.txt", Separators = "\t", InferRows = 2000>
 let quakes = Quakes.Load(@"signif.txt")
 
-quakes.Rows |> Seq.take 2000
-    // we're looking at just those quakes after 1700 for which the month, day and magnitude in EQ_PRIMARY are known
-|> Seq.filter (fun r -> (r.YEAR >= 1700)
-                        && r.MONTH.HasValue
-                        && r.DAY.HasValue 
-                        && not (Double.IsNaN(r.EQ_PRIMARY))  
-)
+let cleanSample =
+    quakes.Rows // |> Seq.take 2000
+        // we're looking at just those quakes after 1700 for which the month, day and magnitude in EQ_PRIMARY are known
+    |> Seq.filter (fun r -> (r.YEAR >= 1700)
+                            && r.MONTH.HasValue
+                            && r.DAY.HasValue 
+                            && not (Double.IsNaN(r.EQ_PRIMARY))  
+    )
+cleanSample
 |> Seq.iter (fun r ->
     let d = new DateTime(r.YEAR, r.MONTH.Value, r.DAY.Value)
-    printfn "%A %A %A %A" r.EQ_PRIMARY d (daysFrom1700(d)) daysToNextFM.[daysFrom1700(d)]
-    
+    let d1700 = daysFrom1700(d)
+    let nextFM = daysToNextFM.[daysFrom1700(d)]
+    let prevFM = nextFM - 30
+    let minDistFromFM = [(d1700-prevFM);(nextFM - d1700)] |> List.min
+    printfn "%A %A %A %A %A %A %A %A" r.EQ_PRIMARY d d1700 nextFM prevFM (d1700 - prevFM) (nextFM - d1700) minDistFromFM     
 )
 
+// ok, so I have a phase lookup table indexed by days from 1 jan 1700 and quake Data
+// I'm after the observations as quake distance from nearest full moon
+// now the thing is what are we checking???? 
+// Is it that quakes happen more often as the distance from a full moon is smaller?
+// Seems a reasonable idea... let's test it 
+// Lets do a histogram of count of quakes by distance from full moon
+let countByDistToFullMoon =
+    cleanSample
+    |> Seq.map (fun r ->
+        let d = new DateTime(r.YEAR, r.MONTH.Value, r.DAY.Value)
+        let d1700 = daysFrom1700(d)
+        let nextFM = daysToNextFM.[daysFrom1700(d)]
+        let prevFM = nextFM - 30
+        let minDistFromFM = [(d1700-prevFM);(nextFM - d1700)] |> List.min
+        r.EQ_PRIMARY, d, d1700, minDistFromFM     
+    )
+    |> Seq.countBy (fun (_, _, _, md) -> md)
+    |> Seq.sortBy (fun (md, _) -> md)
 
+#I "../packages/FSharp.Charting"
+#load "FSharp.Charting.fsx"
+
+open FSharp.Charting
+
+Chart.Bar countByDistToFullMoon
